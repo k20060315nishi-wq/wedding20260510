@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ja" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wedding Reception - Seating Chart</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Shippori+Mincho+B1:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Shippori Mincho B1"', 'serif'],
+                        serif: ['"Cormorant Garamond"', 'serif'],
+                    },
+                    colors: {
+                        gold: { 100: '#F9F1D8', 300: '#E6C888', 500: '#C5A059', 700: '#8A6D3B' },
+                        charcoal: '#2C2C2C',
+                        sand: '#FDFCF8',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        .bg-fixed-cover { background-size: cover; background-position: center; background-attachment: fixed; position: relative; }
+        .bg-overlay::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.2); z-index: 0; }
+        .bg-visual-main { background-image: url('https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=2070&q=80'); }
+        .bg-visual-seating { background-image: url('https://www.transparenttextures.com/patterns/cream-paper.png'); background-color: #FDFCF8; }
+        .glass-panel { background: rgba(255, 255, 255, 0.75); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.6); }
+        .spinner { width: 40px; height: 40px; border: 3px solid rgba(197, 160, 89, 0.3); border-radius: 50%; border-top-color: #C5A059; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAuBDeBGX4ZEoJzUumsEX7PYAEF5N-twHM",
+            authDomain: "wedding-874f2-cof.firebaseapp.com",
+            projectId: "wedding-874f2-cof",
+            storageBucket: "wedding-874f2-cof.firebasestorage.app",
+            messagingSenderId: "865432441403",
+            appId: "1:865432441403:web:b382deea2f0e4b66a6c21e"
+        };
+        
+        let db, auth;
+        const appId = "wedding-874f2-cof"; 
+        const GUESTS_COLLECTION_PATH = `artifacts/${appId}/public/data/guests`; 
+        let allGuestsData = []; 
+
+        const nameInput = document.getElementById('name-input');
+        const resultText = document.getElementById('result-text');
+        const guestTableDisplay = document.getElementById('guest-table-display');
+        const modal = document.getElementById('custom-modal');
+        const modalMessage = document.getElementById('modal-message');
+        const loadingOverlay = document.getElementById('loading-overlay');
+
+        function showModal(message) {
+            modalMessage.textContent = message;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        // カタカナ・半角・全角の差を埋める最強の正規化関数
+        function deepNormalize(str) {
+            if (!str) return "";
+            // 1. Unicode正規化（濁点などの結合を解消）
+            let res = String(str).normalize("NFKC");
+            // 2. カタカナをひらがなに変換
+            res = res.replace(/[\u30A1-\u30F6]/g, m => String.fromCharCode(m.charCodeAt(0) - 0x60));
+            // 3. 空白、ハイフン、記号、中点、カッコをすべて削除
+            res = res.replace(/[\s　\-ー()（）\u30FB,、.。]/g, '');
+            // 4. 小文字化（英字が含まれる場合）
+            return res.toLowerCase();
+        }
+
+        async function initFirebase() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                await signInAnonymously(auth);
+
+                onSnapshot(collection(db, GUESTS_COLLECTION_PATH), (snapshot) => {
+                    let guests = [];
+                    snapshot.forEach(doc => {
+                        const data = doc.data();
+                        guests.push({ id: doc.id, ...data });
+                    });
+                    allGuestsData = guests;
+                    
+                    console.log("=== ゲストリスト同期完了 ===");
+                    allGuestsData.forEach(g => {
+                        // kanaがあれば優先、なければnameをひらがな化して利用
+                        const searchTarget = g.kana || g.name || "";
+                        console.log(`[検証] 名前: ${g.name} | かな: ${g.kana || "(空)"} | 検索キー: ${deepNormalize(searchTarget)}`);
+                    });
+                    
+                    loadingOverlay.classList.add('hidden');
+                }, (err) => {
+                    console.error("Firebase Error:", err);
+                    loadingOverlay.classList.add('hidden');
+                });
+            } catch (error) {
+                console.error("Init Error:", error);
+                loadingOverlay.classList.add('hidden');
+            }
+        }
+
+        async function searchGuest() {
+            const rawInput = nameInput.value.trim();
+            if (!rawInput) {
+                showModal("お名前を入力してください。");
+                return;
+            }
+
+            const searchKey = deepNormalize(rawInput);
+            console.log("検索実行キー:", searchKey);
+
+            loadingOverlay.classList.remove('hidden');
+            await new Promise(r => setTimeout(r, 600));
+
+            // 照合ロジック: Firestoreの 'kana' フィールドか 'name' フィールドのいずれかに一致すればOK
+            const foundGuest = allGuestsData.find(g => {
+                const keyFromKana = deepNormalize(g.kana);
+                const keyFromName = deepNormalize(g.name);
+                return (keyFromKana === searchKey || keyFromName === searchKey) && searchKey !== "";
+            });
+
+            if (foundGuest) {
+                console.log("一致を確認:", foundGuest.name);
+                
+                document.querySelectorAll('.table-item').forEach(el => {
+                    el.classList.remove('bg-gold-500', 'text-white', 'scale-110', 'shadow-xl');
+                    el.classList.add('bg-white', 'text-charcoal');
+                });
+
+                const targetTable = document.getElementById(foundGuest.tableID);
+                if (targetTable) {
+                    targetTable.classList.remove('bg-white', 'text-charcoal');
+                    targetTable.classList.add('bg-gold-500', 'text-white', 'scale-110', 'shadow-xl');
+                }
+
+                resultText.innerHTML = `
+                    <span class="font-serif text-2xl text-gold-500">Welcome</span><br>
+                    <span class="text-3xl font-bold">${foundGuest.name}</span> 様
+                `;
+                guestTableDisplay.textContent = foundGuest.table || "ご案内席";
+                
+                document.getElementById('welcome-screen').classList.add('hidden');
+                document.getElementById('seating-screen').classList.remove('hidden');
+                window.scrollTo(0, 0);
+            } else {
+                showModal("お名前が見つかりませんでした\nお手数ですが\nスタッフにお声がけください");
+            }
+            loadingOverlay.classList.add('hidden');
+        }
+
+        document.getElementById('search-button').addEventListener('click', searchGuest);
+        nameInput.addEventListener('keypress', (e) => e.key === 'Enter' && searchGuest());
+        document.getElementById('re-search-button').addEventListener('click', () => {
+            document.getElementById('seating-screen').classList.add('hidden');
+            document.getElementById('welcome-screen').classList.remove('hidden');
+            nameInput.value = '';
+        });
+        document.getElementById('modal-close').addEventListener('click', () => modal.classList.add('hidden'));
+
+        window.onload = initFirebase;
+    </script>
+</head>
+<body class="bg-sand text-charcoal font-sans antialiased">
+
+    <div id="loading-overlay" class="fixed inset-0 z-50 bg-sand/90 flex flex-col items-center justify-center">
+        <div class="spinner mb-4"></div>
+        <p class="text-gold-700 tracking-widest text-sm font-serif">LOADING...</p>
+    </div>
+
+    <div id="custom-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm">
+        <div class="w-full max-w-sm glass-panel p-8 rounded-2xl shadow-2xl text-center border-t-4 border-gold-500">
+            <p id="modal-message" class="text-lg mb-6 leading-relaxed whitespace-pre-line"></p>
+            <button id="modal-close" class="px-8 py-3 bg-charcoal text-white text-sm tracking-widest rounded-full">CLOSE</button>
+        </div>
+    </div>
+
+    <div id="welcome-screen" class="min-h-screen flex flex-col">
+        <section class="relative w-full h-screen bg-fixed-cover bg-visual-main bg-overlay flex flex-col items-center justify-center text-center px-6">
+            <div class="z-10">
+                <p class="font-serif text-gold-100 text-lg tracking-[0.2em] mb-4">WEDDING RECEPTION</p>
+                <h1 class="font-serif text-5xl sm:text-7xl text-white font-normal leading-tight mb-6">Thank You<br>for Coming</h1>
+                <p class="text-white/90 font-light tracking-wider">本日はご列席いただき誠にありがとうございます</p>
+            </div>
+        </section>
+
+        <section class="w-full bg-sand py-20 px-6 flex justify-center items-center">
+            <div class="w-full max-w-md">
+                <div class="text-center mb-10">
+                    <h2 class="text-2xl font-serif text-charcoal mb-3">Find Your Seat</h2>
+                    <p class="text-sm text-gray-500">お名前を「ひらがな」で入力してください</p>
+                </div>
+                <div class="space-y-8">
+                    <input type="text" id="name-input" class="w-full py-4 px-2 text-xl text-center bg-transparent border-b border-gray-300 focus:border-gold-500 outline-none placeholder-gray-300" placeholder="まいはまみきお">
+                    <div class="text-center">
+                        <button id="search-button" class="px-10 py-4 font-serif tracking-widest text-white bg-charcoal rounded-full hover:bg-gold-500 transition-colors shadow-lg">SEARCH</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div id="seating-screen" class="hidden min-h-screen bg-visual-seating flex flex-col items-center py-12 px-4">
+        <div class="w-full max-w-lg glass-panel rounded-xl p-8 mb-10 text-center shadow-lg border-t-4 border-gold-500">
+            <div id="result-text" class="mb-6 leading-relaxed text-charcoal min-h-[4rem]"></div>
+            <div class="relative inline-block py-2 px-8 border-y border-gold-300 my-4">
+                <p class="text-sm text-gray-500 mb-1">YOUR TABLE</p>
+                <p id="guest-table-display" class="text-4xl font-serif font-bold text-charcoal tracking-wider min-h-[3rem]"></p>
+            </div>
+        </div>
+
+        <div class="w-full max-w-4xl bg-white/80 backdrop-blur-sm rounded-2xl p-10 shadow-inner mb-12">
+            <div class="flex justify-center mb-12">
+                <div class="w-48 h-12 bg-gray-100 rounded-t-full flex items-center justify-center border-b-2 border-gold-500">
+                    <span class="font-serif text-xs tracking-widest text-gray-400">MAIN TABLE</span>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8 justify-items-center">
+                <div id="table-A" class="table-item w-24 h-24 rounded-full bg-white border border-gray-200 flex items-center justify-center shadow-md transition-all duration-500 font-serif text-xl">A</div>
+                <div id="table-B" class="table-item w-24 h-24 rounded-full bg-white border border-gray-200 flex items-center justify-center shadow-md transition-all duration-500 font-serif text-xl">B</div>
+                <div id="table-C" class="table-item w-24 h-24 rounded-full bg-white border border-gray-200 flex items-center justify-center shadow-md transition-all duration-500 font-serif text-xl">C</div>
+                <div id="table-D" class="table-item w-24 h-24 rounded-full bg-white border border-gray-200 flex items-center justify-center shadow-md transition-all duration-500 font-serif text-xl">D</div>
+                <div id="table-E" class="table-item w-24 h-24 rounded-full bg-white border border-gray-200 flex items-center justify-center shadow-md transition-all duration-500 font-serif text-xl">E</div>
+                <div id="table-F" class="table-item w-24 h-24 rounded-full bg-white border border-gray-200 flex items-center justify-center shadow-md transition-all duration-500 font-serif text-xl">F</div>
+                <div id="table-G" class="table-item w-24 h-24 rounded-full bg-white border border-gray-200 flex items-center justify-center shadow-md transition-all duration-500 font-serif text-xl">G</div>
+            </div>
+        </div>
+        <button id="re-search-button" class="text-sm text-gray-400 hover:text-gold-700 underline underline-offset-4 font-serif tracking-wider mb-10">BACK TO SEARCH</button>
+    </div>
+
+</body>
+</html>
